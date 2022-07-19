@@ -42,3 +42,5 @@ select system$pipe_status('my_pipe');
 select count(*) from src.emp;
 
 Select * from "ACME"."INFORMATION_SCHEMA"."Tables";
+
+----------End of line -------------
