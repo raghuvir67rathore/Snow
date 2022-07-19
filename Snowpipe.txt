@@ -1,0 +1,44 @@
+CREATE DATABASE nifi_DB;
+USE DEMO_DB;
+
+Create schema src;
+
+create table src.emp
+( "EMP_NAME" VARCHAR , "EMAIL" VARCHAR , "PHONE" VARCHAR );
+
+select * from emp;
+
+create or replace file format my_csv_format
+  type = csv field_delimiter = ',' skip_header = 1
+  field_optionally_enclosed_by = '"'
+  null_if = ('NULL', 'null') 
+  empty_field_as_null = true;
+  
+  show file formats;
+  
+  
+  //create or replace stage my_stage url='s3://nifibucket/spipe/'
+  //credentials=(aws_role='arn:aws:iam::976279752689:user/Nifi_demo')
+  //file_format = my_csv_format;
+  
+  create or replace stage my_stage url='s3://nifibucket/spipe/'
+  credentials=(aws_key_id='AKIA6GTWOZ7Y2FIRMJOK' aws_secret_key='lnIFmf5KPZyRobMIai2rG6NTz4v1eQvJR6Jt6ZOQ')
+  file_format = my_csv_format;
+  
+  show stages;
+  
+  list @my_stage;
+  
+  create  pipe if not exists my_pipe  as
+copy into src.emp from @my_stage;
+
+show pipes;
+
+DROP PIPE my_pipe;
+alter pipe my_pipe refresh;
+
+select system$pipe_status('my_pipe');
+
+select count(*) from src.emp;
+
+Select * from "ACME"."INFORMATION_SCHEMA"."Tables";
