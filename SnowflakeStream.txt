@@ -1,0 +1,197 @@
+use role sysadmin;
+use warehouse compute_wh;
+create database demo_db;
+use schema demo_db.public;
+
+create or replace table demo_db.public.sales_ext(
+  product_id string,
+  purchase_date string,
+  zip string,
+  units string,
+  revenue string
+);
+
+desc table demo_db.public.sales_ext;
+
+
+
+create or replace stage demo_db.public.sales_ext_stage 
+comment = 'This is my internal stage for loading data to sales external table (TopperTips)';
+
+desc stage demo_db.public.sales_ext_stage;
+
+
+---------------------------------------------------------------------------------------------------
+list @demo_db.public.sales_ext_stage;
+
+CREATE FILE FORMAT "DEMO_DB"."PUBLIC".csv_file_format 
+TYPE = 'CSV' 
+COMPRESSION = 'AUTO' 
+FIELD_DELIMITER = ',' 
+RECORD_DELIMITER = '\n' 
+SKIP_HEADER = 1 
+FIELD_OPTIONALLY_ENCLOSED_BY = '\042' 
+TRIM_SPACE = FALSE ERROR_ON_COLUMN_COUNT_MISMATCH = TRUE 
+ESCAPE = '\134' 
+ESCAPE_UNENCLOSED_FIELD = '\134' 
+DATE_FORMAT = 'AUTO' 
+TIMESTAMP_FORMAT = 'AUTO' 
+NULL_IF = ('\\N');
+
+desc FILE FORMAT "DEMO_DB"."PUBLIC".csv_file_format; 
+
+PUT file:///root/sales.csv @sales_ext_stage;
+list @demo_db.public.sales_ext_stage;
+
+select t.$1,t.$2,t.$3,t.$4,t.$5 from @demo_db.public.sales_ext_stage/sales.csv.gz 
+(file_format =>'"DEMO_DB"."PUBLIC".csv_file_format')t;
+
+select count(*) from "DEMO_DB"."PUBLIC"."SALES_EXT";
+
+copy into "DEMO_DB"."PUBLIC"."SALES_EXT" from @demo_db.public.sales_ext_stage/sales.csv.gz 
+file_format =(format_name='"DEMO_DB"."PUBLIC".csv_file_format');
+
+select count(*) from "DEMO_DB"."PUBLIC"."SALES_EXT";
+
+delete from "DEMO_DB"."PUBLIC"."SALES_EXT";
+-----------------------------------------------------------------------------------------------------------
+
+create or replace table demo_db.public.product_master(
+  product_id int,
+  product_desc varchar(),
+  category varchar(10),
+  segment varchar(20),
+  manufacture_id int,
+  manufacture varchar(50)
+);
+
+PUT file:///root/product_master.csv @sales_ext_stage;
+list @demo_db.public.sales_ext_stage;
+
+copy into "DEMO_DB"."PUBLIC"."PRODUCT_MASTER" from @demo_db.public.sales_ext_stage/product_master.csv.gz 
+file_format =(format_name='"DEMO_DB"."PUBLIC".csv_file_format');
+
+select count(*) from "DEMO_DB"."PUBLIC"."PRODUCT_MASTER";
+
+delete from "DEMO_DB"."PUBLIC"."PRODUCT_MASTER";
+---------------------------------------------------------------------------------------------------------------------
+
+create or replace table demo_db.public.sales_raw(
+  product_id int,
+  purchase_date date,
+  zip varchar(),
+  units int,
+  revenue decimal(10,2)
+);
+
+   insert into demo_db.public.sales_raw 
+        select product_id,purchase_date,zip,units,revenue
+        from demo_db.public.sales_ext 
+        where purchase_date in  ('2000-01-15','2000-01-19','2000-02-15');
+        
+delete from "DEMO_DB"."PUBLIC"."SALES_RAW";
+
+select count(*) from "DEMO_DB"."PUBLIC"."SALES_RAW";
+-------------------------------------------------------------------------------------------------       
+create or replace sequence demo_db.public.sales_sequence start = 1 increment = 1;
+
+create or replace table demo_db.public.sales_consumption(
+  tx_key number  default demo_db.public.sales_sequence.nextval,
+  product_id int ,
+  product_desc varchar(),
+  category varchar(10),
+  segment varchar(20),
+  manufacture varchar(50),
+  purchase_date date,
+  zip varchar(),
+  units int,
+  revenue decimal(10,2)
+);
+
+-- insert as select sql
+insert into "DEMO_DB"."PUBLIC"."SALES_CONSUMPTION" 
+(product_id,product_desc,category,segment,manufacture,purchase_date, zip, units, revenue)
+select 
+  s.product_id, 
+  pm.product_desc, 
+  pm.category, 
+  pm.segment, 
+  pm.manufacture, 
+  s.purchase_date, 
+  s.zip, 
+  s.units, 
+  s.revenue
+from "DEMO_DB"."PUBLIC"."SALES_RAW" s join "DEMO_DB"."PUBLIC"."PRODUCT_MASTER" pm
+on s.product_id  = pm.product_id;
+
+--------------------------------------------------------------------------------------------------
+select count(*) from "DEMO_DB"."PUBLIC"."SALES_RAW";
+
+
+create or replace stream "DEMO_DB"."PUBLIC".sales_raw_stream
+  on table "DEMO_DB"."PUBLIC"."SALES_RAW" 
+  comment = 'Insert only stream on sales raw  table';
+  
+show streams;
+
+select * from demo_db.public.sales_raw_stream;
+
+
+insert into demo_db.public.sales_raw values (101,'2020-01-01',10001,1,111.11 );
+insert into demo_db.public.sales_raw values (102,'2020-01-02',10002,2,222.22 );
+insert into demo_db.public.sales_raw values (103,'2020-01-03',10003,3,333.33 );
+insert into demo_db.public.sales_raw values (104,'2020-01-04',10004,4,444.44 ); 
+
+insert into demo_db.public.sales_raw values (155,'2020-01-25',10005,0,555.55 ); -- will be modified later
+insert into demo_db.public.sales_raw values (166,'2020-01-26',10006,0,600.06 ); -- will be modified later
+insert into demo_db.public.sales_raw values (177,'2020-01-27',10007,0,777.77 ); -- will be modidfied later
+
+insert into demo_db.public.sales_raw values (200,'2020-01-28',10008,3,0.11 );   -- will be deleted later
+insert into demo_db.public.sales_raw values (200,'2020-01-29',10009,3,0.11 );   -- will be deleted later
+insert into demo_db.public.sales_raw values (200,'2020-01-30',10010,3,0.11 );   -- will be deleted later
+
+select count(*) from "DEMO_DB"."PUBLIC"."SALES_RAW";
+select * from demo_db.public.sales_raw_stream;
+select * from demo_db.public.sales_raw_stream where mEtadata$action = 'INSERT';
+
+insert into demo_db.public.sales_consumption 
+(product_id,product_desc,category,segment,manufacture,purchase_date, zip, units, revenue)
+select 
+s.product_id, 
+pm.product_desc, 
+pm.category, 
+pm.segment, 
+pm.manufacture, 
+s.purchase_date, 
+s.zip, s.units, s.revenue
+from demo_db.public.sales_raw_stream s join demo_db.public.product_master pm
+on s.product_id  = pm.product_id
+where s.purchase_date like '2000-01%';
+
+-----------------------------------------------------------------------------------------------
+   insert into demo_db.public.sales_raw 
+        select product_id,purchase_date,zip,units,revenue
+        from demo_db.public.sales_ext 
+        where purchase_date in  ('2000-01-15','2000-01-15');
+
+select count(*) from "DEMO_DB"."PUBLIC"."SALES_RAW";
+select * from demo_db.public.sales_raw_stream;
+
+insert into demo_db.public.sales_consumption 
+(product_id,product_desc,category,segment,manufacture,purchase_date, zip, units, revenue)
+select 
+  s.product_id, 
+  pm.product_desc, 
+  pm.category, 
+  pm.segment, 
+  pm.manufacture, 
+  s.purchase_date, 
+  s.zip, 
+  s.units, 
+  s.revenue
+from demo_db.public.sales_raw_stream s join demo_db.public.product_master pm
+on s.product_id  = pm.product_id;
+
+select count(*) from "DEMO_DB"."PUBLIC"."SALES_CONSUMPTION";
+select * from demo_db.public.sales_raw_stream;
+---------------------------------------------------------------------------------------------------------------
