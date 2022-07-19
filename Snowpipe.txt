@@ -44,3 +44,6 @@ select count(*) from src.emp;
 Select * from "ACME"."INFORMATION_SCHEMA"."Tables";
 
 ----------End of line -------------
+
+
+-----New end of line -------------------
